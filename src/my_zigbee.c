@@ -9,13 +9,31 @@
 
 #include <device.h>
 
-#include <usb/usb_device.h>
-#include <usb/usb_common.h>
-
 #include <net/buf.h>
 #include <net/ieee802154_radio.h>
 
 #include "my_zigbee.h"
+
+#include <zephyr.h>
+#include <board.h>
+#include <gpio.h>
+
+#include "usb_acm.h"
+
+/* Change this if you have an LED connected to a custom port */
+#ifndef LED0_GPIO_CONTROLLER
+#define LED0_GPIO_CONTROLLER 	LED0_GPIO_PORT
+#endif
+
+#define LED_PORT LED0_GPIO_CONTROLLER
+
+/* Change this if you have an LED connected to a custom pin */
+#define LED	LED0_GPIO_PIN
+
+/* 1000 msec = 1 sec */
+#define SLEEP_TIME 	1000
+
+
 
 /* Max Bluetooth command data size */
 #define BLE_ZIGBEE_CLASS_MAX_DATA_SIZE	100
@@ -129,7 +147,6 @@ static int tx(struct net_pkt *pkt)
 	} while (ret && retries--);
 
 	if (ret) {
-		USB_ERR("Error sending data, seq %u", seq);
 		/* Send seq = 0 for unsuccessful send */
 		seq = 0;
 	}
@@ -212,8 +229,6 @@ int net_recv_data(struct net_if *iface, struct net_pkt *pkt)
 {
 	struct net_buf *frag;
 
-	USB_DBG("Got data, pkt %p, len %d", pkt, net_pkt_get_len(pkt));
-
 	frag = net_buf_frag_last(pkt->frags);
 
 	/**
@@ -245,17 +260,36 @@ void main(void)
 		SEGGER_SYSVIEW_PrintfHost("Cannot get IEEE802.15.4 device");
 		return;
 	}
+
+	radio_api = (struct ieee802154_radio_api *)ieee802154_dev->driver_api;
+	
 	SEGGER_SYSVIEW_PrintfHost("IEEE802.15.4 radio initialized!");
-	start();
 	/* Initialize net_pkt */
 	net_pkt_init();
 
 	/* Initialize transmit queue */
 	init_tx_queue();
-
 	radio_api = (struct ieee802154_radio_api *)ieee802154_dev->driver_api;
 
 	/* TODO: Initialize more */
 
 	SEGGER_SYSVIEW_PrintfHost("radio_api %p initialized", radio_api);
+
+	int cnt = 0;
+	struct device *dev;
+
+	dev = device_get_binding(LED_PORT);
+	/* Set LED pin as output */
+	gpio_pin_configure(dev, LED, GPIO_DIR_OUT);
+
+	struct device* usb_acm_dev;
+	usb_acm_setup(&usb_acm_dev);
+
+	while (1) {
+		write_data(usb_acm_dev, "a", 1);
+		/* Set pin to HIGH/LOW every 1 second */
+		gpio_pin_write(dev, LED, cnt % 2);
+		cnt++;
+		k_sleep(SLEEP_TIME);
+	}
 }
