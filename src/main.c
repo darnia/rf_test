@@ -18,6 +18,8 @@
 #include <uart.h>
 #include <zephyr.h>
 
+#include <gpio.h>
+
 #include <zephyr/types.h>
 #include <stddef.h>
 #include <misc/printk.h>
@@ -73,8 +75,7 @@ static void bt_ready(int err)
 }
 
 
-static const char *banner1 = "Send characters to the UART device\r\n";
-static const char *banner2 = "Characters read:\r\n";
+static const char *banner1 = "All your base are belong to us\n";
 
 static volatile bool data_transmitted;
 static volatile bool data_arrived;
@@ -115,8 +116,11 @@ static void write_data(struct device *dev, const char *buf, int len)
 
 static void read_and_echo_data(struct device *dev, int *bytes_read)
 {
-	while (data_arrived == false)
-		;
+    int t = 100;
+	while (t && data_arrived == false)
+    {
+        t--;
+    }
 
 	data_arrived = false;
 
@@ -129,34 +133,33 @@ static void read_and_echo_data(struct device *dev, int *bytes_read)
 
 void main(void)
 {
+
 	struct device *dev;
 	u32_t baudrate, bytes_read, dtr = 0U;
 	int ret;
-
 	dev = device_get_binding(CONFIG_CDC_ACM_PORT_NAME_0);
 	if (!dev) {
 		printf("CDC ACM device not found\n");
 		return;
 	}
 
+    int t = 100;
 	printf("Wait for DTR\n");
-	while (1) {
+	while (t) {
 		uart_line_ctrl_get(dev, LINE_CTRL_DTR, &dtr);
 		if (dtr)
 			break;
+        t--;
 	}
 	printf("DTR set, start test\n");
 
-	/* They are optional, we use them to test the interrupt endpoint */
 	ret = uart_line_ctrl_set(dev, LINE_CTRL_DCD, 1);
 	if (ret)
 		printf("Failed to set DCD, ret code %d\n", ret);
-
 	ret = uart_line_ctrl_set(dev, LINE_CTRL_DSR, 1);
 	if (ret)
 		printf("Failed to set DSR, ret code %d\n", ret);
 
-	/* Wait 1 sec for the host to do all settings */
 	k_busy_wait(1000000);
 
 	ret = uart_line_ctrl_get(dev, LINE_CTRL_BAUD_RATE, &baudrate);
@@ -167,24 +170,27 @@ void main(void)
 
 	uart_irq_callback_set(dev, interrupt_handler);
 	write_data(dev, banner1, strlen(banner1));
-	write_data(dev, banner2, strlen(banner2));
 
-	/* Enable rx interrupts */
 	uart_irq_rx_enable(dev);
-
     int err;
 
     printk("Starting Beacon Demo\n");
 
-    /* Initialize the Bluetooth Subsystem */
     err = bt_enable(bt_ready);
     if (err) {
         printk("Bluetooth init failed (err %d)\n", err);
     }
 
+    struct device *dev_led;
+    int cnt = 1;
+    dev_led = device_get_binding(LED0_GPIO_CONTROLLER);
+    gpio_pin_configure(dev_led, LED0_GPIO_PIN, GPIO_DIR_OUT); 
 
 	/* Echo the received data */
 	while (1) {
+        gpio_pin_write(dev_led, LED0_GPIO_PIN, cnt % 2);
+        cnt++;
+        k_sleep(1000);
 		read_and_echo_data(dev, (int *) &bytes_read);
 	}
 }
